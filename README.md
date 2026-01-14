@@ -1,34 +1,46 @@
-#This serves as the protocol for the methods used in the paper https://doi.org/10.1101/2025.05.23.655811
+# Code protocol for "Virome profiling of Culex tarsalis through small RNA-seq: A challenge of suboptimal samples"
+https://doi.org/10.1371/journal.pntd.0013611 
+
 
 First, we need to get the reference genome for Culex tarsalis (Referenced in paper), and transform the gff3 file into gff and gtf.
 (not specified). and save it into a /refs directory. in my case, the root directory was /Virome
 
 All the necessary codes are either in the Makefile, or in R scripts. Makefile has to be in the root directory, or in a different one if specified.
-Here I use pre-existing environments found in the book Biostar https://www.biostarhandbook.com/
-Or some custom ones when the apps were not compatible with existing environments, as it was the case for cdhit and velvet
+Here I use pre-existing environments (stats and bioinfo) found in the book Biostar https://www.biostarhandbook.com/
 
-##########Note:
+Additionally, some custom ones when the apps were not compatible with existing environments, as it was the case for cdhit and velvet
+
+### Note:
 If I have any problem with sbatch scripts, run the dos2unix command
 Example:
 dos2unix assembly_make.sh
 
+## Pre-processing raw reads
 
-##Qc process of the raw reads (trimmed by novogene)
+### Qc process of the raw reads 50SE
+
+```
 cat samples.txt | parallel --lb make fastqc SRR={}
 
 #multiqc
 make report
+```
 
-##initial trimming
+### Initial trimming
+```
 cat samples.txt | parallel --lb make trim SRR={}
 
-##QC of trimmed reads
+#QC of trimmed reads
 cat samples.txt | parallel --lb make qc_trim SRR={}
+```
 
-##Run for creating the C. tarsalis genome bowtie index
+### Creating the C. tarsalis genome bowtie index
+```
 make index ACC=Culex_tarsalis
+```
 
-##Run for alignment to C. tarsalis reference genome. Unmapped reads will be saved
+### Alignment to C. tarsalis reference genome. Unmapped reads will be saved
+```
 make align SRR=KWNR_S148_L002_R1_001
 make align SRR=P10_S8_L002_R1_001
 make align SRR=P11_S13_L002_R1_001
@@ -48,36 +60,56 @@ make align SRR=P7_S6_L002_R1_001
 make align SRR=P8_S7_L002_R1_001
 make align SRR=P9_S12_L002_R1_001
 
-or
+#or
 
 cat samples.txt | parallel --lb make align SRR={}
+```
 
-##Create Kraken2 reference database
+### Create Kraken2 reference database
+```
 make bacteria_download
 make Kraken2_build
+```
 
-##Then align the remaining reads to bacteria genome using Kraken2
+### Then align the remaining reads to bacteria genome using Kraken2
+```
 cat samples.txt | parallel --lb make Kraken2 SRR={}
+``` 
 
-##Contig assembly
+The remaining reads are now considered processed reads, and these are the ones that will be used for the following steps.
 
+## Contig assembly and extension
+
+### contig assembly 
+```
 cat samples.txt | parallel --lb make velvet SRR={}
 cat samples.txt | parallel --lb make spades SRR={}
+```
 
-#####For samples SRR=P9_S12_L002_R1_001, SRR=P13_S14_L002_R1_001, SRR=P11_S13_L002_R1_001, the contig assembly can only be done with -k 15
+##### For samples SRR=P9_S12_L002_R1_001, SRR=P13_S14_L002_R1_001, SRR=P11_S13_L002_R1_001, the contig assembly can only be done with -k 15
 
-##Now run cdhit and split (To get the 200bp contigs in the contigs folder). It basically pulls the contigs from velvet and SPAdes together.
+Now run cdhit and split (To get the 200bp contigs in the contigs folder). It basically pulls the contigs from velvet and SPAdes together.
+
+### CD-Hit
+```
 cat samples.txt | parallel --lb make combine_contigs SRR={}
 cat samples.txt | parallel --lb make split SRR={}
+```
 
-##After these steps, I manually blasted each file contigs/${SRR}_200.fasta, downloaded the csv file from NCBI blast, and ran the Rscript "blast_format.R" for each sample
-##Then put the resulting contigs files (renamed), into the directory renamed_contigs
+After these steps, I manually ran BLAST in each file contigs/${SRR}_200.fasta, downloaded the csv file from NCBI blast, and ran the Rscript "blast_format.R" for each sample
 
-##Alignment of reads to the contigs
+Then placed the resulting contigs files (renamed.fasta), into the directory virome/renamed_contigs
+
+### Mapping reads to the contigs
+
+```
 cat samples200.txt | parallel --lb make profile200 SRR={}
 cat samples200.txt | parallel --lb make split_sam200 SRR={}
+```
 
-##Create sRNA profiles for each contig of each sam file. Use in stats environment and directory. The directory must include the R and pearl scripts from Aguiar et. al
+### Create sRNA profiles for each contig of each sam file. Use in stats environment and directory. The directory must include the R and pearl scripts from Aguiar et. al
+
+```
 ls ../sam200/KWNR_S148_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=KWNR_S148_L002_R1_001 CONT200={}
 ls ../sam200/P1_S45_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=P1_S45_L002_R1_001 CONT200={}
 ls ../sam200/P2_S46_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=P2_S46_L002_R1_001 CONT200={}
@@ -89,13 +121,19 @@ ls ../sam200/P7_S6_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR
 ls ../sam200/P14_S10_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=P14_S10_L002_R1_001 CONT200={}
 ls ../sam200/P15_S15_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=P15_S15_L002_R1_001 CONT200={}
 ls ../sam200/P17_S17_L002_R1_001/ | parallel --lb make -f ../Makefile stats200 SRR=P17_S17_L002_R1_001 CONT200={}
+```
 
-##Here comes the manual curation. I suggest moving all the profiles into a single folder, and double check the virome profiles looking for 21bp peaks.
-In this case, those are the contigs per sample that seemed to have viral origin
+### Manual curation 
 
-##KWNR =
+I suggest moving all the profiles into a single directory, then download it and visualize it using a .pdf tool. Check the virome profiles looking for 21bp peaks.
+In this case, those are the contigs per sample that seemed to have viral origin.
+
+#### In this case, these are the contigs found per library:
+
+#### KWNR =
 None 
-##P1 =
+
+##### P1 =
 P1_contig006_978_MAG
 P1_contig012_422_MAG
 P1_contig013_306_MAG
@@ -104,7 +142,7 @@ P1_contig016_276_MAG
 P1_contig017_251_MAG
 P1_contig019_244_MAG
 P1_contig020_242_Culex
-##P2 =
+##### P2 =
 P2_contig001_434_Partitivirus-like
 P2_contig002_477_NA_NA
 P2_contig003_328_MAG
@@ -120,31 +158,39 @@ P2_contig015_335_Partitivirus-like
 P2_contig017_284_NA_NA
 P2_contig019_250_NA_NA
 P2_contig021_239_NA_NA
-##P3 = 
+##### P3 = 
 P3_contig008_268_NA_NA
-##P4 =
+##### P4 =
 P4_contig003_268_NA_NA
-##P6 = 
+##### P6 = 
 P6_contig003_750_NA_NA
-##P7 = 
+##### P7 = 
 P7_contig001_419_NA_NA
-##P17 = 
+##### P17 = 
 P17_contig001_449_Culex
 
-##It is important to create a file called curated_contigs.fasta that includes such contigs 
+#### It is important to create a file called curated_contigs.fasta that includes such contigs in their .fasta format 
 
-#Then use this code to decrease redundancy of contigs (use in root directory)
+### Decrease redundancy of contigs (use in root directory/virome)
+```
 cd-hit -i curated_contigs.fasta -o non_redundant_contigs.fasta -c 0.90 -aS 0.90
+```
 
-##Map the remaining reads (mosquito and bacteria free reads) to the contigs for coocurrence analysis 
+### Map the remaining reads (mosquito and bacteria free reads) to the contigs for coocurrence analysis
+
+```
 cat samples.txt | parallel --lb make coocurrence SRR={}
+```
 
-##Calculate the readcounts 
+### Calculate the readcounts
+``` 
 featureCounts -F GTF -t contig -a non_redundant_contigs.gtf -o co_sam/co_bam/counts.txt co_sam/co_bam/KWNR_S148_L002_R1_001.bam co_sam/co_bam/P14_S10_L002_R1_001.bam co_sam/co_bam/P15_S15_L002_R1_001.bam co_sam/co_bam/P17_S17_L002_R1_001.bam co_sam/co_bam/P1_S45_L002_R1_001.bam co_sam/co_bam/P2_S46_L002_R1_001.bam co_sam/co_bam/P3_S47_L002_R1_001.bam co_sam/co_bam/P4_S4_L002_R1_001.bam co_sam/co_bam/P5_S11_L002_R1_001.bam co_sam/co_bam/P6_S5_L002_R1_001.bam co_sam/co_bam/P7_S6_L002_R1_001.bam co_sam/co_bam/P8_S7_L002_R1_001.bam co_sam/co_bam/P10_S8_L002_R1_001.bam co_sam/co_bam/P11_S13_L002_R1_001.bam co_sam/co_bam/P12_S9_L002_R1_001.bam co_sam/co_bam/P13_S14_L002_R1_001.bam co_sam/co_bam/P16_S16_L002_R1_001.bam co_sam/co_bam/P9_S12_L002_R1_001.bam
+```
 
-##Use the resulting counts.txt file and RPKM.R script to make the heatmaps, and retrieve the contig and reads clusters for contig extension with spades. Then take all the cluster_#.fasta files into the root directory 
+We will get a counts.txt file out of it. We should use it as input for the RPKM.R script to make the co-ocurrence heatmaps, and retrieve the contig and reads clusters for contig extension with Spades. Then take all the cluster_#.fasta files into the root directory 
 
-##Run the scripts in the makefile for each cluster (modify as needed)
+### Run the scripts in the terminal for each cluster (modify in the Makefile as needed)
+```
 make cluster_1
 make cluster_2
 make cluster_3
@@ -153,15 +199,22 @@ make cluster_5
 make cluster_6
 make cluster_7
 make cluster_8
+```
 
-##In the root folder use for combining all the extended contigs, and keeping only the ones longer than 200bp, and sort them by size
+In the root folder, use for combining all the extended contigs, and keeping only the ones longer than 200bp, and sort them by size
+
+```
 cat extended_contigs/*/contigs.fasta > final_contigs/contigs.fasta
 cd-hit-est -i final_contigs/contigs.fasta -o final_contigs/contigs2.fasta -c 0.95 -n 10
 seqtk seq -L 200 final_contigs/contigs2.fasta > final_contigs/contigs_final.fasta
 seqkit sort -l -r final_contigs/contigs_final.fasta > final_contigs/contigs_final_sorted.fasta
+```
 
-##From here, we repeat the steps for blasting and use of the blast_format.R, but only for the contigs_final_sorted.fasta file
+From here, we repeat the steps for running BLAST and use of the blast_format.R, but only for the contigs_final_sorted.fasta file
+
 This step allowed us to match the extended contigs with 7 insect specific viruses. Reference genomes were selected and downloaded according to the blast results.
+
+### Reference genomes/sequences
 
 MH188052.1,Culex_Bunyavirus_2
 NC_040716.1,Culex_Iflavi-like_virus_4                  same as MH188011.1 (Genbank)
@@ -171,22 +224,28 @@ MF176248.1,Wuhan_Mosquito_Virus_6
 MW434901.1,Marma_virus
 MK628543.1,Culex_narnavirus_1
 
-##Add the reference genomes into a fasta file called reference_viruses.fa, and index it 
+Add the reference genomes into a fasta file called reference_viruses.fa, and index it 
 bowtie2-build refs/reference_viruses.fa refs/reference_viruses.fa
 
-##Alignment required for sRNA profiling of viruses
+### Alignment required for sRNA profiling of viruses
+```
 make coocurrence_all ACC=reference_viruses
-
-Then remove all secondary and chimeric alignments
+```
+### Remove all secondary and chimeric alignments
+```
 samtools view -h -F 256 -F 2048 viruses/all.sam > viruses/all_filtered.sam
 samtools sort viruses/all_filtered.bam -o viruses/all_filtered.bam
 samtools index viruses/all_filtered.bam
+```
 
-#Split sam files
+### Split sam files
+
+```
 for contig in $(samtools view -H all_filtered.bam | grep '^@SQ' | awk '{print $2}' | cut -d ':' -f 2); do samtools view -h all_filtered.bam $contig > split/${contig}.sam; done
-
-##Create the sRNA profiles for each virus. Go to stats folder 
-
+``` 
+### Create the sRNA profiles for each virus. 
+Go to stats folder 
+```
 make -f ../Makefile stats_virus2 SRR=Culex_Bunyavirus_2
 make -f ../Makefile stats_virus2 SRR=Culex_Iflavi-like_virus_4
 make -f ../Makefile stats_virus2 SRR=Hubei_mosquito_virus_4
@@ -194,17 +253,24 @@ make -f ../Makefile stats_virus2 SRR=Partitivirus_like_virus_4
 make -f ../Makefile stats_virus2 SRR=Wuhan_Mosquito_Virus_6
 make -f ../Makefile stats_virus2 SRR=Marma_virus
 make -f ../Makefile stats_virus2 SRR=Culex_narnavirus_1
+```
 
-##Next is the alignment for coocurrence of virus
+### Alignment for coocurrence of virus
 
-For this is necessary a refs/reference_viruses.fa file, which is the one containing the reference genomes of the viruses.
+For this, it is necessary to have a refs/reference_viruses.fa file, which is the one containing the reference genomes of the viruses.
 
-###First create the index for the reference viruses
+#### First create the index for the reference viruses
+```
 bowtie2-build refs/reference_viruses.fa refs/reference_viruses.fa
+``` 
 
-###Then align the reads to the reference viruses
+### Align the reads to the reference viruses
+
+```
 cat samples.txt | parallel --lb make coocurrence_final SRR={}
+```
 
-###For creating the coverage plots, take the bam and .bai files from the co_sam2/co_bam/ directory, and run the R script "coverage.R"
+## Note: 
+For creating the coverage plots, take the bam and .bai files from the co_sam2/co_bam/ directory, and run the R script "coverage.R"
 
 
